@@ -404,8 +404,16 @@ def test_uvx_gh_help_contains_usage_hint():
     assert "uvx-gh" in result.output or "USER/TOOL" in result.output
 
 
-def test_uvx_gh_no_args_exits_with_usage(uvx_on_path):
+def test_uvx_gh_no_args_shows_help(uvx_on_path):
+    """Bare `uvx-gh` displays full --help (no_args_is_help) and exits 2."""
     result = CliRunner().invoke(cmd, [])
+    assert result.exit_code == 2
+    assert "USER/TOOL" in result.output
+
+
+def test_uvx_gh_user_only_no_tool_spec_exits_1(uvx_on_path, fake_head):
+    """`--user X` without tool_spec hits build_uvx_cmd's usage error (exit 1)."""
+    result = CliRunner().invoke(cmd, ["--user", "alice"])
     assert result.exit_code == 1
 
 
