@@ -1,8 +1,8 @@
 import os
-import subprocess
 
 import pytest
 import typer
+from dulwich.errors import GitProtocolError
 from typer.testing import CliRunner
 
 from uvx_gh import _cache, _git
@@ -23,6 +23,14 @@ def fake_head(monkeypatch):
     """Replace ls_remote_head with a deterministic fake; return the sha."""
     monkeypatch.setattr(_git, "ls_remote_head", lambda url: FAKE_SHA)
     return FAKE_SHA
+
+
+@pytest.fixture
+def uvx_on_path(monkeypatch):
+    """Make the pre-flight `shutil.which('uvx')` always succeed."""
+    import uvx_gh.commands.main as main_mod
+
+    monkeypatch.setattr(main_mod.shutil, "which", lambda name: f"/fake/bin/{name}")
 
 
 # ---------- split_argv ----------
@@ -309,54 +317,82 @@ def test_cache_dir_falls_back_to_xdg(monkeypatch, tmp_path):
     assert _cache._cache_dir() == tmp_path / "xdg" / "uvx-gh"
 
 
-# ---------- _git module ----------
+# ---------- _git module (dulwich-mocked) ----------
 
 
-def _make_completed(stdout: str, returncode: int = 0, stderr: str = ""):
-    return subprocess.CompletedProcess(
-        args=[], returncode=returncode, stdout=stdout, stderr=stderr
+class _FakeLsRemoteResult:
+    def __init__(self, refs: dict):
+        self.refs = refs
+
+
+class _FakeClient:
+    def __init__(self, refs=None, raises=None):
+        self._refs = refs or {}
+        self._raises = raises
+
+    def get_refs(self, path):
+        if self._raises is not None:
+            raise self._raises
+        return _FakeLsRemoteResult(self._refs)
+
+
+def _patch_dulwich(monkeypatch, *, refs=None, raises=None):
+    fake = _FakeClient(refs=refs, raises=raises)
+    monkeypatch.setattr(
+        _git,
+        "get_transport_and_path",
+        lambda url: (fake, "/path"),
     )
 
 
 def test_git_ls_remote_parses_sha(monkeypatch):
-    fake = _make_completed(stdout=f"{FAKE_SHA}\tHEAD\n")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake)
+    _patch_dulwich(monkeypatch, refs={b"HEAD": FAKE_SHA.encode()})
     assert _git.ls_remote_head("https://example.com/foo") == FAKE_SHA
 
 
 def test_git_ls_remote_handles_uppercase_sha(monkeypatch):
-    upper = FAKE_SHA.upper()
-    fake = _make_completed(stdout=f"{upper}\tHEAD\n")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake)
+    _patch_dulwich(monkeypatch, refs={b"HEAD": FAKE_SHA.upper().encode()})
     assert _git.ls_remote_head("https://example.com/foo") == FAKE_SHA  # lowercased
 
 
-def test_git_ls_remote_no_git_exits_127(monkeypatch):
-    def boom(*a, **kw):
-        raise FileNotFoundError("git")
-
-    monkeypatch.setattr(subprocess, "run", boom)
-    with pytest.raises(typer.Exit) as exc:
-        _git.ls_remote_head("https://example.com/foo")
-    assert exc.value.exit_code == 127
-
-
-def test_git_ls_remote_subprocess_failure_exits_1(monkeypatch):
-    def boom(*a, **kw):
-        raise subprocess.CalledProcessError(128, "git", stderr="repo not found")
-
-    monkeypatch.setattr(subprocess, "run", boom)
+def test_git_ls_remote_protocol_error_exits_1(monkeypatch):
+    _patch_dulwich(monkeypatch, raises=GitProtocolError("repo not found"))
     with pytest.raises(typer.Exit) as exc:
         _git.ls_remote_head("https://example.com/foo")
     assert exc.value.exit_code == 1
 
 
-def test_git_ls_remote_garbage_output_exits_1(monkeypatch):
-    fake = _make_completed(stdout="this is not a sha\n")
-    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: fake)
+def test_git_ls_remote_network_error_exits_1(monkeypatch):
+    _patch_dulwich(monkeypatch, raises=OSError("connection refused"))
     with pytest.raises(typer.Exit) as exc:
         _git.ls_remote_head("https://example.com/foo")
     assert exc.value.exit_code == 1
+
+
+def test_git_ls_remote_missing_head_ref_exits_1(monkeypatch):
+    _patch_dulwich(monkeypatch, refs={b"refs/heads/main": FAKE_SHA.encode()})
+    with pytest.raises(typer.Exit) as exc:
+        _git.ls_remote_head("https://example.com/foo")
+    assert exc.value.exit_code == 1
+
+
+def test_git_ls_remote_invalid_sha_exits_1(monkeypatch):
+    _patch_dulwich(monkeypatch, refs={b"HEAD": b"not-a-sha"})
+    with pytest.raises(typer.Exit) as exc:
+        _git.ls_remote_head("https://example.com/foo")
+    assert exc.value.exit_code == 1
+
+
+def test_git_ls_remote_supports_lsremoteresult_attr(monkeypatch):
+    """Both LsRemoteResult.refs and dict-like return values are accepted."""
+    plain_dict = {b"HEAD": FAKE_SHA.encode()}
+
+    class _DictClient:
+        def get_refs(self, path):
+            return plain_dict
+
+    monkeypatch.setattr(_git, "get_transport_and_path", lambda url: (_DictClient(), "/p"))
+    assert _git.ls_remote_head("https://example.com/foo") == FAKE_SHA
 
 
 # ---------- CLI integration ----------
@@ -368,7 +404,7 @@ def test_uvx_gh_help_contains_usage_hint():
     assert "uvx-gh" in result.output or "USER/TOOL" in result.output
 
 
-def test_uvx_gh_no_args_exits_with_usage():
+def test_uvx_gh_no_args_exits_with_usage(uvx_on_path):
     result = CliRunner().invoke(cmd, [])
     assert result.exit_code == 1
 
@@ -401,7 +437,7 @@ def _make_fake_execvp(captured: dict):
     return fake_execvp
 
 
-def test_cli_double_dash_passthrough_reaches_build_uvx_cmd(fake_head, monkeypatch):
+def test_cli_double_dash_passthrough_reaches_build_uvx_cmd(fake_head, uvx_on_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(os, "execvp", _make_fake_execvp(captured))
 
@@ -419,7 +455,7 @@ def test_cli_double_dash_passthrough_reaches_build_uvx_cmd(fake_head, monkeypatc
     ]
 
 
-def test_cli_short_path_end_to_end(fake_head, monkeypatch):
+def test_cli_short_path_end_to_end(fake_head, uvx_on_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(os, "execvp", _make_fake_execvp(captured))
 
@@ -436,7 +472,7 @@ def test_cli_short_path_end_to_end(fake_head, monkeypatch):
     ]
 
 
-def test_cli_user_fallback_end_to_end(fake_head, monkeypatch):
+def test_cli_user_fallback_end_to_end(fake_head, uvx_on_path, monkeypatch):
     captured: dict = {}
     monkeypatch.setattr(os, "execvp", _make_fake_execvp(captured))
 
@@ -449,3 +485,14 @@ def test_cli_user_fallback_end_to_end(fake_head, monkeypatch):
         f"git+https://github.com/alice/foo@{fake_head}",
         "foo",
     ]
+
+
+def test_cli_preflight_missing_uvx_exits_127(fake_head, monkeypatch):
+    """Pre-flight check fires before build_uvx_cmd; exit 127 with friendly message."""
+    import uvx_gh.commands.main as main_mod
+
+    monkeypatch.setattr(main_mod.shutil, "which", lambda name: None)
+
+    result = CliRunner().invoke(cmd, ["alice/foo"])
+    assert result.exit_code == 127
+    assert "uvx not found on PATH" in result.output

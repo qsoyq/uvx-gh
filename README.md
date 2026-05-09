@@ -32,7 +32,7 @@ The `USER/TOOL` short path takes priority over `--user`. Either is required.
 
 ### Why the sha cache?
 
-`uvx --from git+https://...` (without a pinned commit) makes `uv` re-fetch HEAD from GitHub on every call — that's a network roundtrip per invocation. `uvx-gh` resolves HEAD itself with the much lighter `git ls-remote` and pins the URL to the resolved sha (`git+...@<sha>`). After the first run, subsequent calls hit the local cache and incur **zero network traffic** until you explicitly use `@latest`.
+`uvx --from git+https://...` (without a pinned commit) makes `uv` re-fetch HEAD from GitHub on every call — that's a network roundtrip per invocation. `uvx-gh` resolves HEAD itself via the smart-HTTP `ls-remote` protocol (using dulwich, no system git needed) and pins the URL to the resolved sha (`git+...@<sha>`). After the first run, subsequent calls hit the local cache and incur **zero network traffic** until you explicitly use `@latest`.
 
 Cache location:
 
@@ -58,8 +58,22 @@ uvx-gh -- alice/foo --user bob
 #   (--user bob is forwarded to foo, NOT consumed by uvx-gh)
 ```
 
+## Requirements
+
+`uvx-gh` depends on the `uv` toolchain (which provides the `uvx` binary). It does **not** require the system `git` CLI — HEAD resolution uses [dulwich](https://github.com/jelmer/dulwich) (pure Python, bundled as a runtime dep).
+
+Install `uv`:
+
+| Platform | Command                                                          |
+| -------- | ---------------------------------------------------------------- |
+| macOS    | `brew install uv`                                                |
+| Linux    | `curl -LsSf https://astral.sh/uv/install.sh \| sh`               |
+| Windows  | `winget install --id=astral-sh.uv -e`                            |
+| Any      | `pipx install uv`                                                |
+
+`uvx-gh` runs a pre-flight check at startup and exits with a friendly message if `uvx` is not on `PATH`.
+
 ## Notes
 
-- `uvx` must be on `PATH`. Install via `pipx install uv` or `brew install uv` etc.
 - On Windows, `os.execvp` is emulated; signal/exit-code semantics differ slightly from POSIX.
 - The `UVX_VALUE_FLAGS` whitelist in `uvx_gh/commands/main.py` is hand-synced with `uv`'s value-taking flags. Use `--flag=value` form to bypass the whitelist if a new uv flag is missing.

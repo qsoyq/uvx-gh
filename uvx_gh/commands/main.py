@@ -1,5 +1,6 @@
 import os
 import re
+import shutil
 from typing import List, Optional, Tuple
 
 import typer
@@ -20,12 +21,19 @@ helptext = """\
 
 \b
 后缀语义:
-  TOOL         → 使用本地 sha 缓存（首次 git ls-remote 一次后落盘）
+  TOOL         → 使用本地 sha 缓存（首次 ls-remote 一次后落盘）
   TOOL@latest  → 强制重新解析 HEAD 并刷新缓存
   TOOL@REF     → 作为 git ref 拼到 URL (tag / branch / sha)
 
 \b
 缓存位置: $UVX_GH_CACHE_HOME 或 $XDG_CACHE_HOME/uvx-gh
+
+\b
+依赖 uv（提供 uvx 命令）:
+  macOS:   brew install uv
+  Linux:   curl -LsSf https://astral.sh/uv/install.sh | sh
+  Windows: winget install --id=astral-sh.uv -e
+  通用:    pipx install uv
 """
 
 # uvx 中"独立 token 取值"的选项白名单（不带 = 时会吃下一个 argv）。
@@ -202,6 +210,17 @@ def main(
     ),
 ) -> None:
     """从 github.com/<user>/<tool> 拉取并 uvx 运行。"""
+    if shutil.which("uvx") is None:
+        typer.echo(
+            "uvx-gh: uvx not found on PATH. Install uv via:\n"
+            "  macOS:   brew install uv\n"
+            "  Linux:   curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+            "  Windows: winget install --id=astral-sh.uv -e\n"
+            "  通用:    pipx install uv",
+            err=True,
+        )
+        raise typer.Exit(127)
+
     cmd_vec = build_uvx_cmd(user, list(ctx.args))
     try:
         os.execvp(cmd_vec[0], cmd_vec)
