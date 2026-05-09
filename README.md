@@ -1,9 +1,65 @@
-# python-cli-template
+# uvx-gh
 
-Command line application template for python.
+Thin wrapper to `uvx`-run a tool published as a GitHub repo at `github.com/<user>/<tool>[@<ref>]`.
 
 ## Install
 
 ```bash
-pip install git+https://github.com/qsoyq/python-cli-template.git
+# One-off run
+uvx uvx-gh alice/foo
+
+# Or install
+pip install uvx-gh
+# pip install git+https://github.com/qsoyq/uvx-gh.git    # latest from GitHub
 ```
+
+## Usage
+
+```text
+uvx-gh [uvx-options...] USER/TOOL[@REF] [tool-args...]
+uvx-gh [uvx-options...] --user USER TOOL[@REF] [tool-args...]
+```
+
+The `USER/TOOL` short path takes priority over `--user`. Either is required.
+
+### Ref suffix
+
+| Spec              | Behavior                                                                            |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `alice/foo`       | use locally cached HEAD sha; first call resolves via `git ls-remote` and persists   |
+| `alice/foo@latest`| force re-resolve HEAD via `git ls-remote` and overwrite the cached sha              |
+| `alice/foo@v1.2.3`| pin to git ref (tag / branch / sha) directly — bypasses the sha cache               |
+
+### Why the sha cache?
+
+`uvx --from git+https://...` (without a pinned commit) makes `uv` re-fetch HEAD from GitHub on every call — that's a network roundtrip per invocation. `uvx-gh` resolves HEAD itself with the much lighter `git ls-remote` and pins the URL to the resolved sha (`git+...@<sha>`). After the first run, subsequent calls hit the local cache and incur **zero network traffic** until you explicitly use `@latest`.
+
+Cache location:
+
+- `$UVX_GH_CACHE_HOME` if set
+- otherwise `$XDG_CACHE_HOME/uvx-gh/` (default `~/.cache/uvx-gh/`)
+
+Layout: `<cache_dir>/github.com/<user>/<tool>` containing the sha as a single line.
+
+### Pass-through
+
+Anything the wrapper does not recognize is forwarded:
+
+- Tokens before `TOOL_SPEC` go to `uvx` (e.g. `--python 3.12`, `--with extras`)
+- Tokens after `TOOL_SPEC` go to the tool itself
+- `--` ends wrapper-arg parsing; everything after `--` is treated as tool args
+
+```bash
+uvx-gh --python 3.12 alice/foo --port 8080
+# → uvx --python 3.12 --from git+https://github.com/alice/foo foo --port 8080
+
+uvx-gh -- alice/foo --user bob
+# → uvx --from git+https://github.com/alice/foo foo --user bob
+#   (--user bob is forwarded to foo, NOT consumed by uvx-gh)
+```
+
+## Notes
+
+- `uvx` must be on `PATH`. Install via `pipx install uv` or `brew install uv` etc.
+- On Windows, `os.execvp` is emulated; signal/exit-code semantics differ slightly from POSIX.
+- The `UVX_VALUE_FLAGS` whitelist in `uvx_gh/commands/main.py` is hand-synced with `uv`'s value-taking flags. Use `--flag=value` form to bypass the whitelist if a new uv flag is missing.

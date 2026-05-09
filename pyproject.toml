@@ -1,23 +1,25 @@
 [project]
-name = "python-cli-template"
-version = "0.1.3"
-description = "Command line application template for python."
+name = "uvx-gh"
+version = "0.1.0"
+description = "Thin wrapper to uvx-run a tool from github.com/<user>/<tool>[@<ref>]."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "ipython>=8.37.0",
-    "pre-commit>=4.5.1",
-    "typer-utils@git+https://github.com/qsoyq/typer_utils",
+    "typer>=0.12",
 ]
 
 [project.scripts]
-cli-template = "cli_template.commands.main:cmd"
+uvx-gh = "uvx_gh.commands.main:cmd"
+
+[dependency-groups]
+dev = [
+    "ipython>=8.37.0",
+    "pre-commit>=4.5.1",
+    "pytest>=8.0",
+]
 
 [tool.hatch.build.targets.wheel]
-packages = ["cli_template"]
-
-[tool.hatch.metadata]
-allow-direct-references = true
+packages = ["uvx_gh"]
 
 [build-system]
 requires = ["hatchling"]
@@ -99,16 +101,8 @@ ignore_missing_imports = false
 exclude = ['^venv/', '^__init__\.py$']
 explicit_package_bases = true
 
-[[tool.mypy.overrides]]
-module = [
-    "typer_utils.*",
-]
-ignore_missing_imports = true
-follow_untyped_imports = true
-
 [tool.pytest.ini_options]
 markers = []
 
 [tool.isort]
 profile = "hug"
-src_paths = ["cli_template"]

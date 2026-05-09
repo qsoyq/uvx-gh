@@ -1,6 +1,5 @@
-from typer_utils.utils import is_cmd_exists
+import shutil
 
 
 def test_cmd():
-    result = is_cmd_exists("cli-template")
-    assert result is True
+    assert shutil.which("uvx-gh") is not None
