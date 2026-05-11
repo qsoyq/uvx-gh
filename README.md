@@ -30,6 +30,28 @@ The `USER/TOOL` short path takes priority over `--user`. Either is required.
 | `alice/foo@latest`| force re-resolve HEAD via `git ls-remote` and overwrite the cached sha              |
 | `alice/foo@v1.2.3`| pin to git ref (tag / branch / sha) directly — bypasses the sha cache               |
 
+### Extras (PEP 508)
+
+Append `[extras]` to the tool name to request optional dependency groups, just like `pip install pkg[extras]`:
+
+```bash
+# httpx CLI requires the [cli] extras (click + pygments + rich) to actually run
+uvx-gh encode/httpx[cli] -- https://example.com
+
+# Multiple extras + a pinned ref
+uvx-gh "encode/httpx[cli,http2]@master" -- https://example.com
+```
+
+Internally this becomes a PEP 508 direct reference forwarded to `uvx`:
+
+```text
+uvx --from "httpx[cli] @ git+https://github.com/encode/httpx@<sha>" httpx ...
+```
+
+Extras do **not** participate in the sha cache key — the same `<user>/<tool>` shares one ls-remote result across every extras combination, and `@latest` on any variant refreshes the sha for all of them. uv keeps a separate venv per extras combination under `~/.cache/uv/environments-v2/<hash>/`.
+
+> Quote the spec when extras contain commas, otherwise the shell may treat `,` or brackets specially in some contexts.
+
 ### Why the sha cache?
 
 `uvx --from git+https://...` (without a pinned commit) makes `uv` re-fetch HEAD from GitHub on every call — that's a network roundtrip per invocation. `uvx-gh` resolves HEAD itself via the smart-HTTP `ls-remote` protocol (using dulwich, no system git needed) and pins the URL to the resolved sha (`git+...@<sha>`). After the first run, subsequent calls hit the local cache and incur **zero network traffic** until you explicitly use `@latest`.

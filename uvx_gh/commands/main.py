@@ -10,6 +10,7 @@ from uvx_gh.commands import version_callback
 
 GITHUB_HOST = "github.com"
 _NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_TOOL_EXTRAS_RE = re.compile(r"^([A-Za-z0-9._-]+)(?:\[([A-Za-z0-9._,-]+)\])?$")
 
 helptext = """\
 从 github.com/USER/TOOL 拉取并 uvx 运行的薄壳。
@@ -24,6 +25,12 @@ helptext = """\
   TOOL         → 使用本地 sha 缓存（首次 ls-remote 一次后落盘）
   TOOL@latest  → 强制重新解析 HEAD 并刷新缓存
   TOOL@REF     → 作为 git ref 拼到 URL (tag / branch / sha)
+
+\b
+Extras (PEP 508):
+  TOOL\\[cli]            → 装该 extras 后再运行
+  TOOL\\[cli,http2]@REF  → 多 extras + ref 组合
+  注: extras 不影响 sha 缓存 key，多种 extras 共用同一份 ls-remote 结果
 
 \b
 缓存位置: $UVX_GH_CACHE_HOME 或 $XDG_CACHE_HOME/uvx-gh
@@ -148,8 +155,8 @@ def build_uvx_cmd(user: Optional[str], argv: List[str]) -> List[str]:
     tool_part, _, ref = tool_spec.partition("@")
 
     if "/" in tool_part:
-        spec_user, _, tool = tool_part.partition("/")
-        if not spec_user or not tool:
+        spec_user, _, raw_tool = tool_part.partition("/")
+        if not spec_user or not raw_tool:
             typer.echo(
                 f"uvx-gh: invalid tool spec {tool_spec!r}, expected <user>/<tool>[@<ref>]",
                 err=True,
@@ -163,17 +170,33 @@ def build_uvx_cmd(user: Optional[str], argv: List[str]) -> List[str]:
                 err=True,
             )
             raise typer.Exit(1)
-        spec_user, tool = user, tool_part
+        spec_user, raw_tool = user, tool_part
 
-    if not tool:
+    if not raw_tool:
         typer.echo(f"uvx-gh: invalid tool spec {tool_spec!r}", err=True)
         raise typer.Exit(1)
+
+    m = _TOOL_EXTRAS_RE.match(raw_tool)
+    if not m:
+        typer.echo(
+            f"uvx-gh: invalid tool spec {tool_spec!r}, expected <tool>[<extras>][@<ref>]",
+            err=True,
+        )
+        raise typer.Exit(1)
+    tool, extras = m.group(1), m.group(2) or ""
 
     _validate_name(spec_user, "user")
     _validate_name(tool, "tool")
 
+    if extras:
+        for e in extras.split(","):
+            if not e or not _NAME_RE.match(e):
+                typer.echo(f"uvx-gh: invalid extra {e!r} in {tool_spec!r}", err=True)
+                raise typer.Exit(1)
+
     from_url = _resolve_from_url(spec_user, tool, ref)
-    return ["uvx", *flags, "--from", from_url, tool, *tool_args]
+    from_value = f"{tool}[{extras}] @ {from_url}" if extras else from_url
+    return ["uvx", *flags, "--from", from_value, tool, *tool_args]
 
 
 def _version_eager(value: bool) -> None:

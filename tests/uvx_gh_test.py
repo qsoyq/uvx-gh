@@ -229,6 +229,92 @@ def test_build_uvx_cmd_rejects_path_traversal_and_special_chars(bad_name):
         build_uvx_cmd(bad_name, ["foo"])
 
 
+# ---------- extras (PEP 508) ----------
+
+
+def test_build_uvx_cmd_extras_short_path(fake_head):
+    """alice/foo[bar] → --from "foo[bar] @ git+...@<sha>"."""
+    result = build_uvx_cmd(None, ["alice/foo[bar]"])
+    assert result == [
+        "uvx",
+        "--from",
+        f"foo[bar] @ git+https://github.com/alice/foo@{fake_head}",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_extras_with_at_latest(fake_head):
+    result = build_uvx_cmd(None, ["alice/foo[bar]@latest"])
+    assert result == [
+        "uvx",
+        "--from",
+        f"foo[bar] @ git+https://github.com/alice/foo@{fake_head}",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_extras_with_explicit_ref():
+    result = build_uvx_cmd(None, ["alice/foo[bar]@v1.2.3"])
+    assert result == [
+        "uvx",
+        "--from",
+        "foo[bar] @ git+https://github.com/alice/foo@v1.2.3",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_multiple_extras(fake_head):
+    result = build_uvx_cmd(None, ["alice/foo[bar,baz]"])
+    assert result == [
+        "uvx",
+        "--from",
+        f"foo[bar,baz] @ git+https://github.com/alice/foo@{fake_head}",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_extras_with_user_fallback(fake_head):
+    result = build_uvx_cmd("alice", ["foo[bar]"])
+    assert result == [
+        "uvx",
+        "--from",
+        f"foo[bar] @ git+https://github.com/alice/foo@{fake_head}",
+        "foo",
+    ]
+
+
+def test_extras_share_sha_cache_with_bare_call(monkeypatch):
+    """Different extras of the same repo must hit the same sha cache entry."""
+    calls = []
+
+    def counting_ls_remote(url):
+        calls.append(url)
+        return FAKE_SHA
+
+    monkeypatch.setattr(_git, "ls_remote_head", counting_ls_remote)
+
+    build_uvx_cmd(None, ["alice/foo"])
+    build_uvx_cmd(None, ["alice/foo[bar]"])
+    build_uvx_cmd(None, ["alice/foo[baz,qux]"])
+
+    assert calls == ["https://github.com/alice/foo"]
+
+
+@pytest.mark.parametrize(
+    "bad_spec",
+    [
+        "alice/foo[]",
+        "alice/foo[bar,]",
+        "alice/foo[,bar]",
+        "alice/foo[bar baz]",
+        "alice/foo[bar;rm]",
+    ],
+)
+def test_build_uvx_cmd_invalid_extras_exits(bad_spec):
+    with pytest.raises(typer.Exit):
+        build_uvx_cmd(None, [bad_spec])
+
+
 # ---------- cache hit/miss interaction with build_uvx_cmd ----------
 
 
