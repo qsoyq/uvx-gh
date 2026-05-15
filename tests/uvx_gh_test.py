@@ -315,6 +315,94 @@ def test_build_uvx_cmd_invalid_extras_exits(bad_spec):
         build_uvx_cmd(None, [bad_spec])
 
 
+# ---------- --no-git: tarball URL emission ----------
+
+
+def test_build_uvx_cmd_no_git_uses_tarball_with_resolved_sha(fake_head):
+    """no_git=True with cache miss → archive tarball pinned to resolved sha."""
+    result = build_uvx_cmd(None, ["alice/foo"], no_git=True)
+    assert result == [
+        "uvx",
+        "--from",
+        f"https://github.com/alice/foo/archive/{fake_head}.tar.gz",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_no_git_at_latest_pins_tarball_to_resolved_sha(fake_head):
+    result = build_uvx_cmd(None, ["alice/foo@latest"], no_git=True)
+    assert result == [
+        "uvx",
+        "--from",
+        f"https://github.com/alice/foo/archive/{fake_head}.tar.gz",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_no_git_explicit_ref_passthrough():
+    result = build_uvx_cmd(None, ["alice/foo@v1.2.3"], no_git=True)
+    assert result == [
+        "uvx",
+        "--from",
+        "https://github.com/alice/foo/archive/v1.2.3.tar.gz",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_no_git_url_encodes_slashes_in_ref():
+    """branch names with `/` must be percent-encoded so the URL stays well-formed."""
+    result = build_uvx_cmd(None, ["alice/foo@release/1.x"], no_git=True)
+    assert result == [
+        "uvx",
+        "--from",
+        "https://github.com/alice/foo/archive/release%2F1.x.tar.gz",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_no_git_extras(fake_head):
+    result = build_uvx_cmd(None, ["alice/foo[bar]"], no_git=True)
+    assert result == [
+        "uvx",
+        "--from",
+        f"foo[bar] @ https://github.com/alice/foo/archive/{fake_head}.tar.gz",
+        "foo",
+    ]
+
+
+def test_build_uvx_cmd_no_git_default_false_emits_git_https(fake_head):
+    """Sanity: omitting no_git keeps the existing git+https behavior."""
+    result = build_uvx_cmd(None, ["alice/foo"])
+    assert result[2].startswith("git+https://")
+
+
+def test_cli_no_git_flag_end_to_end(fake_head, uvx_on_path, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(os, "execvp", _make_fake_execvp(captured))
+
+    result = CliRunner().invoke(cmd, ["--no-git", "alice/foo"])
+
+    assert isinstance(result.exception, _ExecCalled), result.output
+    assert captured["args"] == [
+        "uvx",
+        "--from",
+        f"https://github.com/alice/foo/archive/{fake_head}.tar.gz",
+        "foo",
+    ]
+
+
+def test_cli_no_git_via_env_var(fake_head, uvx_on_path, monkeypatch):
+    """UVX_GH_NO_GIT=1 should toggle --no-git without the flag."""
+    captured: dict = {}
+    monkeypatch.setattr(os, "execvp", _make_fake_execvp(captured))
+    monkeypatch.setenv("UVX_GH_NO_GIT", "1")
+
+    result = CliRunner().invoke(cmd, ["alice/foo"])
+
+    assert isinstance(result.exception, _ExecCalled), result.output
+    assert captured["args"][2] == f"https://github.com/alice/foo/archive/{fake_head}.tar.gz"
+
+
 # ---------- cache hit/miss interaction with build_uvx_cmd ----------
 
 

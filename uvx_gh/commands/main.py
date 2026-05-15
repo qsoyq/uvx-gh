@@ -2,6 +2,7 @@ import os
 import re
 import shutil
 from typing import List, Optional, Tuple
+from urllib.parse import quote
 
 import typer
 
@@ -31,6 +32,12 @@ Extras (PEP 508):
   TOOL\\[cli]            → 装该 extras 后再运行
   TOOL\\[cli,http2]@REF  → 多 extras + ref 组合
   注: extras 不影响 sha 缓存 key，多种 extras 共用同一份 ls-remote 结果
+
+\b
+--no-git (UVX_GH_NO_GIT=1):
+  改用 GitHub archive tarball 安装, uv 不再调系统 git。
+  URL 形如 https://github.com/USER/TOOL/archive/<ref-or-sha>.tar.gz。
+  仅适用于公开仓库; 私有仓库仍需 git 凭证, 请勿使用。
 
 \b
 缓存位置: $UVX_GH_CACHE_HOME 或 $XDG_CACHE_HOME/uvx-gh
@@ -113,12 +120,15 @@ def _validate_name(name: str, kind: str) -> None:
         raise typer.Exit(1)
 
 
-def _resolve_from_url(spec_user: str, tool: str, ref: str) -> str:
-    """Build the ``git+https://...`` URL, pinning to a sha when possible.
+def _resolve_from_url(spec_user: str, tool: str, ref: str, no_git: bool = False) -> str:
+    """Build the install source URL, pinning to a sha when possible.
 
     - empty ``ref``: use cached sha if present, else ``git ls-remote`` once and cache.
     - ``"latest"``: always re-resolve via ls-remote and overwrite cache.
     - other ``ref`` (tag / branch / sha): pass through unchanged.
+
+    ``no_git=True`` emits a GitHub archive tarball URL instead of ``git+https``,
+    so uv installs via plain HTTP without invoking the system git binary.
     """
     https_url = f"https://{GITHUB_HOST}/{spec_user}/{tool}"
     if not ref:
@@ -126,15 +136,20 @@ def _resolve_from_url(spec_user: str, tool: str, ref: str) -> str:
         if sha is None:
             sha = _git.ls_remote_head(https_url)
             _cache.write_sha(GITHUB_HOST, spec_user, tool, sha)
-        return f"git+{https_url}@{sha}"
-    if ref == "latest":
-        sha = _git.ls_remote_head(https_url)
-        _cache.write_sha(GITHUB_HOST, spec_user, tool, sha)
-        return f"git+{https_url}@{sha}"
-    return f"git+{https_url}@{ref}"
+        pinned = sha
+    elif ref == "latest":
+        pinned = _git.ls_remote_head(https_url)
+        _cache.write_sha(GITHUB_HOST, spec_user, tool, pinned)
+    else:
+        pinned = ref
+
+    if no_git:
+        # quote(safe="") encodes "/" so branch names like "release/1.x" survive.
+        return f"{https_url}/archive/{quote(pinned, safe='')}.tar.gz"
+    return f"git+{https_url}@{pinned}"
 
 
-def build_uvx_cmd(user: Optional[str], argv: List[str]) -> List[str]:
+def build_uvx_cmd(user: Optional[str], argv: List[str], no_git: bool = False) -> List[str]:
     """根据透传 argv 构造最终要执行的 uvx 命令向量。
 
     tool_spec 解析优先级:
@@ -194,7 +209,7 @@ def build_uvx_cmd(user: Optional[str], argv: List[str]) -> List[str]:
                 typer.echo(f"uvx-gh: invalid extra {e!r} in {tool_spec!r}", err=True)
                 raise typer.Exit(1)
 
-    from_url = _resolve_from_url(spec_user, tool, ref)
+    from_url = _resolve_from_url(spec_user, tool, ref, no_git=no_git)
     from_value = f"{tool}[{extras}] @ {from_url}" if extras else from_url
     return ["uvx", *flags, "--from", from_value, tool, *tool_args]
 
@@ -223,6 +238,12 @@ def main(
         "--user",
         help="GitHub user/org (fallback when tool_spec is not in <user>/<tool> form)",
     ),
+    no_git: bool = typer.Option(
+        False,
+        "--no-git",
+        help="改用 GitHub archive tarball, uv 不再依赖系统 git binary (公开仓库专用)",
+        envvar="UVX_GH_NO_GIT",
+    ),
     _version: bool = typer.Option(
         False,
         "--version",
@@ -245,7 +266,7 @@ def main(
         )
         raise typer.Exit(127)
 
-    cmd_vec = build_uvx_cmd(user, list(ctx.args))
+    cmd_vec = build_uvx_cmd(user, list(ctx.args), no_git=no_git)
     try:
         os.execvp(cmd_vec[0], cmd_vec)
     except FileNotFoundError as exc:

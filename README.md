@@ -52,6 +52,21 @@ Extras do **not** participate in the sha cache key — the same `<user>/<tool>` 
 
 > Quote the spec when extras contain commas, otherwise the shell may treat `,` or brackets specially in some contexts.
 
+### `--no-git` (skip the system git binary)
+
+`uv` itself shells out to the system `git` binary when installing a `git+https://` source. On hosts without git (typical Windows boxes that only have `uv` installed), the install fails with `Git executable not found`.
+
+Pass `--no-git` (or set `UVX_GH_NO_GIT=1`) to emit a GitHub archive tarball URL instead — `uv` then downloads over plain HTTP and never calls git:
+
+```bash
+uvx-gh --no-git qsoyq/ai-assistant -- --help
+# → uvx --from "https://github.com/qsoyq/ai-assistant/archive/<sha>.tar.gz" ai-assistant --help
+```
+
+Caveats:
+- Public repos only. Private repos still need git credentials.
+- `uv` does not reuse a git checkout cache for tarballs, so each new sha re-downloads.
+
 ### Why the sha cache?
 
 `uvx --from git+https://...` (without a pinned commit) makes `uv` re-fetch HEAD from GitHub on every call — that's a network roundtrip per invocation. `uvx-gh` resolves HEAD itself via the smart-HTTP `ls-remote` protocol (using dulwich, no system git needed) and pins the URL to the resolved sha (`git+...@<sha>`). After the first run, subsequent calls hit the local cache and incur **zero network traffic** until you explicitly use `@latest`.
