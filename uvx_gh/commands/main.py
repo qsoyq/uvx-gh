@@ -40,6 +40,12 @@ Extras (PEP 508):
   仅适用于公开仓库; 私有仓库仍需 git 凭证, 请勿使用。
 
 \b
+--exec EXEC:
+  当包名 ≠ 可执行入口名时, 用 --exec 指定要运行的 entrypoint。
+  等价于 `uvx --from <pkg> <exec>`。
+  例: uvx-gh --exec rssapi-server qsoyq/rssapi -p 8000
+
+\b
 缓存位置: $UVX_GH_CACHE_HOME 或 $XDG_CACHE_HOME/uvx-gh
 
 \b
@@ -149,13 +155,21 @@ def _resolve_from_url(spec_user: str, tool: str, ref: str, no_git: bool = False)
     return f"git+{https_url}@{pinned}"
 
 
-def build_uvx_cmd(user: Optional[str], argv: List[str], no_git: bool = False) -> List[str]:
+def build_uvx_cmd(
+    user: Optional[str],
+    argv: List[str],
+    no_git: bool = False,
+    exec_name: Optional[str] = None,
+) -> List[str]:
     """根据透传 argv 构造最终要执行的 uvx 命令向量。
 
     tool_spec 解析优先级:
       1. ``alice/foo[@ref]`` 短路径（slash 形式）覆盖 ``user``
       2. 否则使用 ``user`` 作为 fallback
       3. 都没有则报错退出
+
+    ``exec_name`` 非空时覆盖默认的「executable 等于 tool 名」逻辑,
+    用于处理「PyPI 包名 ≠ entrypoint 名」的场景 (如 rssapi 包提供 rssapi-server)。
     """
     flags, tool_spec, tool_args = split_argv(argv)
 
@@ -209,9 +223,17 @@ def build_uvx_cmd(user: Optional[str], argv: List[str], no_git: bool = False) ->
                 typer.echo(f"uvx-gh: invalid extra {e!r} in {tool_spec!r}", err=True)
                 raise typer.Exit(1)
 
+    if exec_name is not None:
+        if exec_name in (".", "..") or not _NAME_RE.match(exec_name):
+            typer.echo(f"uvx-gh: invalid --exec value {exec_name!r}", err=True)
+            raise typer.Exit(1)
+        run_target = exec_name
+    else:
+        run_target = tool
+
     from_url = _resolve_from_url(spec_user, tool, ref, no_git=no_git)
     from_value = f"{tool}[{extras}] @ {from_url}" if extras else from_url
-    return ["uvx", *flags, "--from", from_value, tool, *tool_args]
+    return ["uvx", *flags, "--from", from_value, run_target, *tool_args]
 
 
 def _version_eager(value: bool) -> None:
@@ -244,6 +266,12 @@ def main(
         help="改用 GitHub archive tarball, uv 不再依赖系统 git binary (公开仓库专用)",
         envvar="UVX_GH_NO_GIT",
     ),
+    exec_name: Optional[str] = typer.Option(
+        None,
+        "--exec",
+        metavar="EXEC",
+        help="指定要运行的 entrypoint (当 PyPI 包名 ≠ 可执行名时, 如 rssapi → rssapi-server)",
+    ),
     _version: bool = typer.Option(
         False,
         "--version",
@@ -266,7 +294,7 @@ def main(
         )
         raise typer.Exit(127)
 
-    cmd_vec = build_uvx_cmd(user, list(ctx.args), no_git=no_git)
+    cmd_vec = build_uvx_cmd(user, list(ctx.args), no_git=no_git, exec_name=exec_name)
     try:
         os.execvp(cmd_vec[0], cmd_vec)
     except FileNotFoundError as exc:

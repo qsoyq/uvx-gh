@@ -315,6 +315,94 @@ def test_build_uvx_cmd_invalid_extras_exits(bad_spec):
         build_uvx_cmd(None, [bad_spec])
 
 
+# ---------- --exec: override entrypoint when pkg name != exec name ----------
+
+
+def test_build_uvx_cmd_exec_overrides_run_target(fake_head):
+    """--exec rssapi-server: --from 仍按 tool 名, 但运行 rssapi-server。"""
+    result = build_uvx_cmd(None, ["alice/rssapi"], exec_name="rssapi-server")
+    assert result == [
+        "uvx",
+        "--from",
+        f"git+https://github.com/alice/rssapi@{fake_head}",
+        "rssapi-server",
+    ]
+
+
+def test_build_uvx_cmd_exec_with_extras_and_ref():
+    result = build_uvx_cmd(
+        None,
+        ["alice/rssapi[cli]@v1.0"],
+        exec_name="rssapi-server",
+    )
+    assert result == [
+        "uvx",
+        "--from",
+        "rssapi[cli] @ git+https://github.com/alice/rssapi@v1.0",
+        "rssapi-server",
+    ]
+
+
+def test_build_uvx_cmd_exec_passes_tool_args(fake_head):
+    result = build_uvx_cmd(
+        None,
+        ["alice/rssapi", "-p", "8000"],
+        exec_name="rssapi-server",
+    )
+    assert result == [
+        "uvx",
+        "--from",
+        f"git+https://github.com/alice/rssapi@{fake_head}",
+        "rssapi-server",
+        "-p",
+        "8000",
+    ]
+
+
+def test_build_uvx_cmd_exec_with_no_git(fake_head):
+    result = build_uvx_cmd(
+        None,
+        ["alice/rssapi"],
+        no_git=True,
+        exec_name="rssapi-server",
+    )
+    assert result == [
+        "uvx",
+        "--from",
+        f"https://github.com/alice/rssapi/archive/{fake_head}.tar.gz",
+        "rssapi-server",
+    ]
+
+
+@pytest.mark.parametrize(
+    "bad_exec",
+    ["bad name", "bad;name", "bad/name", "", "."],
+)
+def test_build_uvx_cmd_exec_rejects_invalid_names(bad_exec, fake_head):
+    with pytest.raises(typer.Exit):
+        build_uvx_cmd(None, ["alice/foo"], exec_name=bad_exec)
+
+
+def test_cli_exec_flag_end_to_end(fake_head, uvx_on_path, monkeypatch):
+    captured: dict = {}
+    monkeypatch.setattr(os, "execvp", _make_fake_execvp(captured))
+
+    result = CliRunner().invoke(
+        cmd,
+        ["--no-git", "--exec", "rssapi-server", "qsoyq/rssapi", "-p", "8000"],
+    )
+
+    assert isinstance(result.exception, _ExecCalled), result.output
+    assert captured["args"] == [
+        "uvx",
+        "--from",
+        f"https://github.com/qsoyq/rssapi/archive/{fake_head}.tar.gz",
+        "rssapi-server",
+        "-p",
+        "8000",
+    ]
+
+
 # ---------- --no-git: tarball URL emission ----------
 
 
