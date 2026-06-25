@@ -110,6 +110,60 @@ Install `uv`:
 
 `uvx-gh` runs a pre-flight check at startup and exits with a friendly message if `uvx` is not on `PATH`.
 
+## Development
+
+Install the project and development tools:
+
+```bash
+uv sync --group dev
+```
+
+Run repository checks:
+
+```bash
+uv run pre-commit run -a
+uv run pytest
+uv build
+```
+
+The CI workflow runs the same quality gate on pull requests and pushes to `main`.
+
+## Branch and Review Strategy
+
+This repository uses GitHub Flow:
+
+- `main` is the release branch.
+- Changes should be made through pull requests from short-lived branches.
+- Branch names should follow `<type>/<issue-number>-<short-desc>` when an issue exists.
+- PRs should link their issue, describe validation, document risks, and note any AI-assisted work.
+
+The expected branch protection is documented in `.github/settings.yml`: at least one approving review, CODEOWNERS review, and the `CI / quality` status check before merge. Platform-side branch protection or rulesets must still be enabled in GitHub for this expectation to take effect.
+
+## Release
+
+Releases are published to PyPI by the `Release to PyPI` workflow when a GitHub release is published or the workflow is manually dispatched. The workflow uses PyPI trusted publishing through the `pypi` GitHub environment.
+
+Before publishing:
+
+- Confirm `uv build` succeeds.
+- Confirm the version in `pyproject.toml` is correct.
+- Confirm the `pypi` environment has required reviewers configured in GitHub.
+- Prepare rollback by publishing a follow-up patch release if a bad package is released.
+
+More release notes are in `docs/release/pypi.md`.
+
+## Maintainer
+
+The repository owner and default CODEOWNER is `@qsoyq`.
+
+## Related Docs
+
+- `CONTRIBUTING.md`
+- `SECURITY.md`
+- `docs/tech/ci.md`
+- `docs/release/pypi.md`
+- `docs/decisions/0001-github-governance-baseline.md`
+
 ## Notes
 
 - On Windows, `os.execvp` is emulated; signal/exit-code semantics differ slightly from POSIX.

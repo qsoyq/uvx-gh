@@ -47,6 +47,7 @@ repos:
                 - fastapi
                 - httpx
                 - asyncache
+                - dulwich
                 - pytest
                 - types-pytz
                 - types-cachetools

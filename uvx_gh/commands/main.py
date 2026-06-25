@@ -104,10 +104,10 @@ def split_argv(argv: List[str]) -> Tuple[List[str], Optional[str], List[str]]:
         a = argv[i]
         if a == "--":
             tool_spec = argv[i + 1] if i + 1 < len(argv) else None
-            tail = argv[i + 2:] if tool_spec is not None else []
+            tail = argv[i + 2 :] if tool_spec is not None else []
             return flags, tool_spec, tail
         if not a.startswith("-"):
-            return flags, a, argv[i + 1:]
+            return flags, a, argv[i + 1 :]
         if "=" in a or a not in UVX_VALUE_FLAGS:
             flags.append(a)
             i += 1
@@ -175,8 +175,7 @@ def build_uvx_cmd(
 
     if not tool_spec:
         typer.echo(
-            "Usage: uvx-gh [uvx-options...] <user>/<tool>[@<ref>] [tool-args...]\n"
-            "   or: uvx-gh [uvx-options...] --user <user> <tool>[@<ref>] [tool-args...]",
+            "Usage: uvx-gh [uvx-options...] <user>/<tool>[@<ref>] [tool-args...]\n   or: uvx-gh [uvx-options...] --user <user> <tool>[@<ref>] [tool-args...]",
             err=True,
         )
         raise typer.Exit(1)
@@ -194,8 +193,7 @@ def build_uvx_cmd(
     else:
         if not user:
             typer.echo(
-                f"uvx-gh: cannot resolve GitHub user for {tool_spec!r}; "
-                "pass <user>/<tool> or --user <user>",
+                f"uvx-gh: cannot resolve GitHub user for {tool_spec!r}; pass <user>/<tool> or --user <user>",
                 err=True,
             )
             raise typer.Exit(1)

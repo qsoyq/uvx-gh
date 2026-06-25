@@ -8,9 +8,13 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       id-token: write
       contents: read
+    concurrency:
+      group: release-pypi
+      cancel-in-progress: false
     environment:
       name: pypi
       url: https://pypi.org/p/uvx-gh
